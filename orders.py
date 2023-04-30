@@ -3,10 +3,6 @@ import requests
 import xmltodict
 from requests_oauthlib import OAuth1
 
-auth = OAuth1('uke2pVaOE6zcWy7c9EqoVuCEIbVsgX2Olxc2gvB9d087', 'ys04yTX7yvjDHoaeup55hfAlfKqr9o5IoXrUq05wulg3',
-              'tsKhET3lnBkVgTZd7KzFwQCOuu1SBXx6MdTROQZzblI0', 'gyAEh1VcJT4DwFm62qhKfhXpcKD447j78K21WVzCsVg4')
-
-
 def option_strike(name):
     """Pull apart an OCC standardized option name and
     retreive the strike price, in integer form"""
