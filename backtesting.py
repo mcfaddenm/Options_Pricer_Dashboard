@@ -5,6 +5,7 @@ import numpy as np
 import numexpr as ne
 from trading_strats import *
 
+
 class Backtest:
     def __init__(self, start, end, strategy, portfolio, cash):
         # Cash is invested into a money market ETF
@@ -17,7 +18,7 @@ class Backtest:
         self.assets = list(self.portfolio.index)
         self.equity = sum(self.portfolio.Weights)
         self.portfolio.Weights = self.portfolio.Weights / self.equity
-        self.strategy = strategy = MovingAverageCrossoverStrategy(self.assets, self.start, self.end)
+        self.strategy = strategy
 
     def run(self):
         # Get price data for assets
@@ -28,25 +29,58 @@ class Backtest:
         # Generate buy/sell signals
         signals = self.strategy.generate_signals()
 
+        weights = pd.DataFrame(1 / 6, index=signals.index, columns=self.portfolio.index)
+        portfolio_weights = pd.DataFrame(columns=signals.columns)
 
-        weights = self.portfolio.Weights.copy()
-        portfolio_weights = pd.DataFrame(index=signals.index, columns=signals.columns)
+        jpst_index = weights.columns.get_loc('JPST')
+        signals_values = signals.values
+        weights_values = self.portfolio.Weights.values
+        portfolio_values = portfolio_weights.values
 
-        # Calculate weights for each asset and day
-        for day in signals.index:
-            for asset in signals.columns:
-                if signals.loc[day, asset] == 1:
-                    weights[asset] += 0.1
-                elif signals.loc[day, asset] == -1:
-                    weights[asset] -= 0.1
-            if any(signals.loc[day] != 0):
-                portfolio_weights.loc[day] = weights
+        for i in range(len(signals)):
+            jpst_weight = weights_values[jpst_index]
+            other_weights = weights_values[:jpst_index] + weights_values[jpst_index + 1:]
+
+            signals_row = signals_values[i]
+            updated_weights = weights_values.copy()
+
+            for j in range(len(signals.columns)):
+                if j == jpst_index:
+                    continue
+
+                signal = signals_row[j]
+                if signal == 1:
+                    delta = -0.05
+                elif signal == -1:
+                    delta = 0.05
+                else:
+                    delta = 0.0
+
+                if delta != 0 and other_weights.sum() > 0:
+                    new_weight = updated_weights[j] * (1 + delta)
+                    jpst_delta = -delta * other_weights.sum() / jpst_weight
+
+                    if jpst_weight <= jpst_delta:
+                        new_weight += jpst_weight
+                        jpst_delta = jpst_weight
+
+                    updated_weights[j] = max(new_weight, 0)
+                    updated_weights[jpst_index] = max(jpst_weight + jpst_delta, 0)
+
+            total_weight = updated_weights.sum()
+            if total_weight > 0:
+                updated_weights /= total_weight
+
+            weights_values = updated_weights
+            portfolio_values[i] = updated_weights
+
+        portfolio_weights = pd.DataFrame(portfolio_values, index=signals.index, columns=signals.columns)
 
         # Calculate weighted returns
         weighted_returns = (returns * weights).sum(axis=1)
         portfolio_returns = (1 + weighted_returns).cumprod() * self.equity
 
-        return portfolio_returns, weights
+        return portfolio_returns, portfolio_weights
 
     def generate_report(self):
         # Gets portfolio values over time with weights
@@ -92,5 +126,3 @@ class Backtest:
     def get_portfolio(self):
         # Returns the current portfolio in-use by the backtesting model
         return self.portfolio
-
-
