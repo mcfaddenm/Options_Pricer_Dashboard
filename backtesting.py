@@ -29,55 +29,30 @@ class Backtest:
         # Generate buy/sell signals
         signals = self.strategy.generate_signals()
 
-        weights = pd.DataFrame(1 / 6, index=signals.index, columns=self.portfolio.index)
-        portfolio_weights = pd.DataFrame(columns=signals.columns)
+        weights = pd.Series(self.portfolio.Weights.values, index=self.assets)
+        portfolio_weights = pd.DataFrame([self.portfolio.Weights.values] * len(signals), index=signals.index, columns=self.assets)
 
-        jpst_index = weights.columns.get_loc('JPST')
-        signals_values = signals.values
-        weights_values = self.portfolio.Weights.values
-        portfolio_values = portfolio_weights.values
-
-        for i in range(len(signals)):
-            jpst_weight = weights_values[jpst_index]
-            other_weights = weights_values[:jpst_index] + weights_values[jpst_index + 1:]
-
-            signals_row = signals_values[i]
-            updated_weights = weights_values.copy()
-
-            for j in range(len(signals.columns)):
-                if j == jpst_index:
-                    continue
-
-                signal = signals_row[j]
-                if signal == 1:
-                    delta = -0.05
-                elif signal == -1:
+        SIG_index = signals.columns
+        for day in signals.index:
+            new_weights = weights.copy()
+            for asset in SIG_index:
+                if signals.loc[day, asset] == 1:
                     delta = 0.05
+                elif signals.loc[day, asset] == -1:
+                    delta = -0.05
                 else:
                     delta = 0.0
 
-                if delta != 0 and other_weights.sum() > 0:
-                    new_weight = updated_weights[j] * (1 + delta)
-                    jpst_delta = -delta * other_weights.sum() / jpst_weight
-
-                    if jpst_weight <= jpst_delta:
-                        new_weight += jpst_weight
-                        jpst_delta = jpst_weight
-
-                    updated_weights[j] = max(new_weight, 0)
-                    updated_weights[jpst_index] = max(jpst_weight + jpst_delta, 0)
-
-            total_weight = updated_weights.sum()
-            if total_weight > 0:
-                updated_weights /= total_weight
-
-            weights_values = updated_weights
-            portfolio_values[i] = updated_weights
-
-        portfolio_weights = pd.DataFrame(portfolio_values, index=signals.index, columns=signals.columns)
+                if delta != 0:
+                    new_weights[asset] *= (1 + delta)
+                    new_weights['JPST'] *= (1 - delta)
+            else:
+                if any(signals.loc[day] != 0):
+                    weights = new_weights
+                    portfolio_weights.loc[day] = new_weights
 
         # Calculate weighted returns
-        weighted_returns = (returns * weights).sum(axis=1)
+        weighted_returns = (returns * portfolio_weights).sum(axis=1)
         portfolio_returns = (1 + weighted_returns).cumprod() * self.equity
 
         return portfolio_returns, portfolio_weights
