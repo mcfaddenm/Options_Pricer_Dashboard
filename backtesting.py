@@ -31,7 +31,7 @@ class Backtest:
 
         weights = pd.Series(self.portfolio.Weights.values, index=self.assets)
         portfolio_weights = pd.DataFrame([self.portfolio.Weights.values] * len(signals), index=signals.index, columns=self.assets)
-
+# Algo trading
         SIG_index = signals.columns
         for day in signals.index:
             new_weights = weights.copy()
