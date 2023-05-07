@@ -1,4 +1,3 @@
-import pandas
 import pandas as pd
 import yfinance as yf
 import numpy as np
@@ -31,10 +30,10 @@ class Backtest:
 
         weights = pd.Series(self.portfolio.Weights.values, index=self.assets)
         portfolio_weights = pd.DataFrame([self.portfolio.Weights.values] * len(signals), index=signals.index, columns=self.assets)
-# Algo trading
+
         SIG_index = signals.columns
-        for day in signals.index:
-            new_weights = weights.copy()
+        for i, day in enumerate(signals.index[1:], start=1):
+            new_weights = portfolio_weights.iloc[i-1].copy(deep=True)
             for asset in SIG_index:
                 if signals.loc[day, asset] == 1:
                     delta = 0.05
@@ -44,12 +43,10 @@ class Backtest:
                     delta = 0.0
 
                 if delta != 0:
-                    new_weights[asset] *= (1 + delta)
-                    new_weights['JPST'] *= (1 - delta)
-            else:
-                if any(signals.loc[day] != 0):
-                    weights = new_weights
-                    portfolio_weights.loc[day] = new_weights
+                    new_weights.loc[asset] *= (1 + delta)
+                    new_weights.loc['JPST'] *= (1 - delta)
+
+            portfolio_weights.loc[day] = new_weights.values
 
         # Calculate weighted returns
         weighted_returns = (returns * portfolio_weights).sum(axis=1)
@@ -84,19 +81,19 @@ class Backtest:
 
         return performance
 
-    def update_portfolio(self, portfolio: pandas.DataFrame):
+    def update_portfolio(self, portfolio: pd.DataFrame):
         # Add cash position to portfolio
-        portfolio.loc['JPST'] = 1000
+        portfolio.loc['JPST'] = self.portfolio.Weights.loc['JPST'] * self.equity
         self.portfolio = portfolio
 
         # Convert portfolio to dataframe and normalize weights
         self.portfolio['Weights'] = np.divide(self.portfolio['Weights'], np.sum(self.portfolio['Weights']))
 
         # Get list of assets in portfolio
-        self.assets = self.portfolio.index.tolist()
+        self.assets = portfolio.index.tolist()
 
         # Updates the strategy
-        self.strategy = MovingAverageCrossoverStrategy(self.assets, self.start, self.end)
+        # self.strategy = MovingAverageCrossoverStrategy(self.assets, self.start, self.end)
 
     def get_portfolio(self):
         # Returns the current portfolio in-use by the backtesting model
