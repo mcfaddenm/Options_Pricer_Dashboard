@@ -50,3 +50,31 @@ class LongStrategy:
         signals = pd.DataFrame(0, index=date_list, columns=self.assets)
 
         return signals
+
+
+class EWMAverageCrossoverStrategy:
+    def __init__(self, assets, start, end):
+        self.assets = assets
+        self.start = start
+        self.end = end
+
+    def generate_signals(self):
+        # Downloads closing price history
+        tickers = yf.Tickers(self.assets)
+        cls_price = tickers.history(start=self.start, end=self.end, interval="1d")['Close']
+
+        # Computes the short-term and long-term EWMA for the portfolio
+        ewma_short = cls_price.ewm(span=50, adjust=False).mean().dropna()
+        ewma_long = cls_price.ewm(span=200, adjust=False).mean().dropna()
+        ewma_short = ewma_short[ewma_short.index.isin(ewma_long.index)]
+
+        # Creates a dataframe containing raw signal data from the EWMA crossovers
+        raw_signal = np.where(ewma_short > ewma_long, 1, 0)
+        raw_signal = pd.DataFrame(np.where(ewma_short < ewma_long, -1, raw_signal).astype(np.int_), index=ewma_short.index,
+                                  columns=cls_price.columns)
+        # Compute boolean mask where signal changes
+        mask = (raw_signal != raw_signal.shift())
+        # Final dataframe containing trading signals
+        signals = raw_signal.where(mask, 0)
+
+        return signals

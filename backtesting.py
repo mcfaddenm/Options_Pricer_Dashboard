@@ -28,7 +28,6 @@ class Backtest:
         # Generate buy/sell signals
         signals = self.strategy.generate_signals()
 
-        weights = pd.Series(self.portfolio.Weights.values, index=self.assets)
         portfolio_weights = pd.DataFrame([self.portfolio.Weights.values] * len(signals), index=signals.index, columns=self.assets)
 
         SIG_index = signals.columns
@@ -48,8 +47,9 @@ class Backtest:
 
             portfolio_weights.loc[day] = new_weights.values
 
+        # returns = returns[returns.index.isin(portfolio_weights)]
         # Calculate weighted returns
-        weighted_returns = (returns * portfolio_weights).sum(axis=1)
+        weighted_returns = np.multiply(returns, portfolio_weights).sum(axis=1)
         portfolio_returns = (1 + weighted_returns).cumprod() * self.equity
 
         return portfolio_returns, portfolio_weights
