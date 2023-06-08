@@ -2,57 +2,37 @@ import pandas as pd
 import yfinance as yf
 import numpy as np
 import numexpr as ne
+import datetime
 from trading_strats import *
 
 
 class Backtest:
     def __init__(self, start, end, strategy, portfolio, cash):
-        # Cash is invested into a money market ETF
-        cash = pd.DataFrame(dict(Tickers=['JPST'], Weights=[cash])).set_index('Tickers')
-        portfolio = pd.concat([portfolio, cash], axis=0)
         # Class objects
         self.start = start
         self.end = end
         self.portfolio = portfolio
         self.assets = list(self.portfolio.index)
-        self.equity = sum(self.portfolio.Weights)
-        self.portfolio.Weights = self.portfolio.Weights / self.equity
+        self.equity = cash
         self.strategy = strategy
 
     def run(self):
         # Get price data for assets
         tickers = yf.Tickers(self.assets)
-        cls_price = tickers.history(start=self.start, end=self.end, interval="1d")['Close']
-        returns = cls_price.pct_change()[1:]
+        closing_price = tickers.history(start=self.start, end=self.end, interval="1d")['Close']
+
+        # Uses percent difference method to calculate daily returns
+        returns = closing_price.pct_change()[1:]
 
         # Generate buy/sell signals
         signals = self.strategy.generate_signals()
 
-        portfolio_weights = pd.DataFrame([self.portfolio.Weights.values] * len(signals), index=signals.index, columns=self.assets)
+        days = closing_price.index.strftime('%Y-%m-%d')
 
-        SIG_index = signals.columns
-        for i, day in enumerate(signals.index[1:], start=1):
-            new_weights = portfolio_weights.iloc[i-1].copy(deep=True)
-            for asset in SIG_index:
-                if signals.loc[day, asset] == 1:
-                    delta = 0.05
-                elif signals.loc[day, asset] == -1:
-                    delta = -0.05
-                else:
-                    delta = 0.0
+        for index, day in signals.iterrows():
+            print(index, "-------", closing_price.loc[index], "-----", signals.loc[index])
 
-                if delta != 0:
-                    new_weights.loc[asset] *= (1 + delta)
-                    new_weights.loc['JPST'] *= (1 - delta)
-
-            portfolio_weights.loc[day] = new_weights.values
-
-        # returns = returns[returns.index.isin(portfolio_weights)]
-        # Calculate weighted returns
-        weighted_returns = np.multiply(returns, portfolio_weights).sum(axis=1)
-        portfolio_returns = (1 + weighted_returns).cumprod() * self.equity
-
-        return portfolio_returns, portfolio_weights
+        return 1
 
     def generate_report(self):
         # Gets portfolio values over time with weights
@@ -66,17 +46,17 @@ class Backtest:
         portfolio_value_start = portfolio_value[0]
 
         # Use numpy functions to perform calculations on arrays
-        portfolio_volatility = 100 * (np.std(portfolio_returns, ddof=0) * np.sqrt(252))
-        portfolio_cumulative_return = 100 * ((portfolio_value_end - portfolio_value_start) / portfolio_value_start)
+        portfolio_volatility = (np.std(portfolio_returns, ddof=1) * np.sqrt(252))
+        portfolio_cumulative_return = (portfolio_value_end - portfolio_value_start) / portfolio_value_start
+        portfolio_annual_return = ((1 + portfolio_cumulative_return) ** (252/len(portfolio_value.index))) - 1
 
         # Use numexpr to evaluate complex numerical expressions with high performance
-        portfolio_sharpe_ratio = ne.evaluate(
-            "((portfolio_cumulative_return / 100) - 0.035) / (portfolio_volatility / 100)")
+        portfolio_sharpe_ratio = (portfolio_annual_return - 0.035) / portfolio_volatility
 
-        performance = [portfolio_volatility, portfolio_cumulative_return, float(portfolio_sharpe_ratio)]
+        performance = [portfolio_volatility, portfolio_annual_return, portfolio_sharpe_ratio]
 
-        print("Portfolio volatility: ", performance[0])
-        print("Portfolio Return: ", performance[1])
+        print("Portfolio Volatility: ", performance[0])
+        print("Portfolio Annual Return: ", performance[1])
         print("Portfolio Sharpe Ratio: ", performance[2])
 
         return performance
@@ -98,3 +78,11 @@ class Backtest:
     def get_portfolio(self):
         # Returns the current portfolio in-use by the backtesting model
         return self.portfolio
+
+    def initPort(self):
+        # Get price data for assets
+        tickers = yf.Tickers(self.assets)
+        prices = tickers.history(start=self.start, end=self.end, interval="1d")['Close'].iloc[0]
+
+        # Calculate the number of shares
+        self.portfolio['Shares'] = (self.portfolio.Weights * self.equity)/prices
