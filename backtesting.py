@@ -96,49 +96,30 @@ class Backtest:
         signals = self.strategy.generate_signals()
 
         # Initializes dataframe for daily portfolio tracking
-        daily_records = pd.DataFrame(0.0, index=signals.index, columns=['Securities', 'Cash', 'PnL'])
+        daily_records = pd.DataFrame(0.0, index=signals.index, columns=['Securities', 'Cash', 'RPnL', 'UPnL'])
         pnl = 0.0
         for index, day in signals.iterrows():
             for asset in self.assets:
                 if signals.loc[index, asset] == 1:
-                    print(datetime.datetime.strftime(index, '%Y-%m-%d'), "BUY", asset, "@ price $", round(closing_price.loc[index, asset], 3))
+                    print(datetime.datetime.strftime(index, '%Y-%m-%d'), "BUY", asset, "@ price $",
+                          round(closing_price.loc[index, asset], 3))
                     pnl = self.transact(1, asset=asset, price=closing_price.loc[index, asset], shares=150)
                 elif signals.loc[index, asset] == -1:
-                    print(datetime.datetime.strftime(index, '%Y-%m-%d'), "SELL", asset, "@ price: $", round(closing_price.loc[index, asset], 3))
+                    print(datetime.datetime.strftime(index, '%Y-%m-%d'), "SELL", asset, "@ price: $",
+                          round(closing_price.loc[index, asset], 3))
                     pnl = self.transact(-1, asset=asset, price=closing_price.loc[index, asset], shares=150)
                 else:
                     self.portfolio.Price = closing_price.loc[index]
             # Adds daily record
-            daily_records.loc[index] = [np.matmul(self.portfolio.Price, self.portfolio.Shares), self.cash, self.pnl]
+            port_value = np.matmul(self.portfolio.Price, self.portfolio.Shares)
+            daily_records.loc[index] = [port_value, self.cash, self.pnl, (port_value + self.cash) - 1e5]
 
         return daily_records
 
-    def generate_report(self):
-        # Gets portfolio values over time with weights
-        portfolio_value, portfolio_weights = self.run()
-
-        # Portfolio log difference change
-        portfolio_returns = portfolio_value.pct_change()
-
-        # Pre-compute portfolio_value[-1] and portfolio_value[0]
-        portfolio_value_end = portfolio_value[-1]
-        portfolio_value_start = portfolio_value[0]
-
-        # Use numpy functions to perform calculations on arrays
-        portfolio_volatility = (np.std(portfolio_returns, ddof=1) * np.sqrt(252))
-        portfolio_cumulative_return = (portfolio_value_end - portfolio_value_start) / portfolio_value_start
-        portfolio_annual_return = ((1 + portfolio_cumulative_return) ** (252 / len(portfolio_value.index))) - 1
-
-        # Use numexpr to evaluate complex numerical expressions with high performance
-        portfolio_sharpe_ratio = (portfolio_annual_return - 0.035) / portfolio_volatility
-
-        performance = [portfolio_volatility, portfolio_annual_return, portfolio_sharpe_ratio]
-
-        print("Portfolio Volatility: ", performance[0])
-        print("Portfolio Annual Return: ", performance[1])
-        print("Portfolio Sharpe Ratio: ", performance[2])
-
-        return performance
+    def generate_report(self, records):
+        returns = np.diff(np.sum(records.iloc[:, 0:2], axis=1))
+        max_ret, min_ret = max(returns), min(returns)
+        return 0
 
     def update_portfolio(self, portfolio: pd.DataFrame):
         # Add cash position to portfolio
