@@ -68,8 +68,8 @@ class EWMA:
         cls_price = tickers.history(start=self.start, end=self.end, interval="1d")['Close']
 
         # Computes the short-term and long-term EWMA for the portfolio
-        ewma_long = cls_price.ewm(span=50, adjust=False).mean().dropna()
-        ewma_short = cls_price.ewm(span=10, adjust=False).mean().dropna()
+        ewma_long = cls_price.ewm(span=200, adjust=False).mean().dropna()
+        ewma_short = cls_price.ewm(span=50, adjust=False).mean().dropna()
         ewma_short = ewma_short[ewma_short.index.isin(ewma_long.index)]
 
         # Initialize the raw_signal dataframe with zeros
