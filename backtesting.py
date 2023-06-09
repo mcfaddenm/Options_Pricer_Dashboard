@@ -97,7 +97,7 @@ class Backtest:
 
         # Initializes dataframe for daily portfolio tracking
         daily_records = pd.DataFrame(0.0, index=signals.index, columns=['Securities', 'Cash', 'PnL'])
-        pnl = 0
+        pnl = 0.0
         for index, day in signals.iterrows():
             for asset in self.assets:
                 if signals.loc[index, asset] == 1:
