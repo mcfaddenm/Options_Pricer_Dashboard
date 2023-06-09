@@ -30,7 +30,7 @@ class Backtest:
 
         # Calculates cost of portfolio and updates the cash holdings
         cost = np.matmul(self.portfolio.Price, self.portfolio.Shares)
-        self.cash -= cost
+        self.cash -= cost * 1.01
 
         # Recalculate the weights
         self.portfolio['Weights'] = self.portfolio.Shares / sum(self.portfolio.Shares)
