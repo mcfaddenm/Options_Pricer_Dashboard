@@ -13,6 +13,7 @@ class Backtest:
         self.end = end
         self.portfolio = portfolio
         self.assets = list(self.portfolio.index)
+        self.equity = cash
         self.cash = cash
         self.strategy = strategy
         self.pnl = 0
@@ -117,9 +118,24 @@ class Backtest:
         return daily_records
 
     def generate_report(self, records):
-        returns = np.diff(np.sum(records.iloc[:, 0:2], axis=1))
-        max_ret, min_ret = max(returns), min(returns)
-        return 0
+        # Calculating percent change
+        a = np.sum(records.iloc[:, 0:2], axis=1)
+        pct_returns = np.diff(a) / a[1:]
+        pct_returns = pd.DataFrame(np.insert(pct_returns, 0, 0.0, axis=0), columns=['Returns'])
+
+        values = pd.DataFrame(np.sum(records.iloc[:, 0:2], axis=1), index=records.index, columns=['Values'])
+        returns = pd.DataFrame(np.diff(values.Values), index=records.index[1:], columns=['Returns'])
+
+        max_ret, min_ret = max(returns.Returns), min(returns.Returns)
+        print("MAX DRAWDOWN:", returns.index[returns.Returns == min_ret].date[0].strftime('%Y-%m-%d'), round(min_ret, 3))
+        print("GOLDEN TICKET:", returns.index[returns.Returns == max_ret].date[0].strftime('%Y-%m-%d'), round(max_ret, 3))
+
+        years = int(self.end[0:4]) - int(self.start[0:4])
+        exp_ret = 100 * (((np.sum(records.iloc[len(records)-1, 0:2], axis=0) / np.sum(records.iloc[0, 0:2])) ** (1/years)) - 1)
+        vol = np.std(pct_returns.Returns) * np.sqrt(252) * 100
+        print("PORTFOLIO VOLATILITY:", round(vol, 3))
+        print("PORTFOLIO RETURN:", round(exp_ret, 3))
+        print("SHARPE RATIO:", round((exp_ret - 2.25)/vol, 3))
 
     def update_portfolio(self, portfolio: pd.DataFrame):
         # Add cash position to portfolio
