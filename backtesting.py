@@ -31,7 +31,7 @@ class Backtest:
 
         # Calculates cost of portfolio and updates the cash holdings
         cost = np.matmul(self.portfolio.Price, self.portfolio.Shares)
-        self.cash -= cost * 1.01
+        self.cash -= cost
 
         # Recalculate the weights
         self.portfolio['Weights'] = self.portfolio.Shares / sum(self.portfolio.Shares)
@@ -66,9 +66,8 @@ class Backtest:
             prev_price = self.portfolio.loc[asset, 'Price']
 
             # Asserts that there is enough shares to sell
-            rem_shares = self.portfolio.loc[asset, 'Shares']
-            if rem_shares < shares:
-                return 0
+            if shares > self.portfolio.loc[asset, 'Shares']:
+                print("NOT ENOUGH SHARES")
             else:
                 # Calculates and updates proceeds
                 proceeds = shares * price
@@ -104,16 +103,16 @@ class Backtest:
                 if signals.loc[index, asset] == 1:
                     print(datetime.datetime.strftime(index, '%Y-%m-%d'), "BUY", asset, "@ price $",
                           round(closing_price.loc[index, asset], 3))
-                    pnl = self.transact(1, asset=asset, price=closing_price.loc[index, asset], shares=150)
+                    pnl = self.transact(1, asset=asset, price=closing_price.loc[index, asset], shares=np.floor(0.3 * self.portfolio.loc[asset, 'Shares']))
                 elif signals.loc[index, asset] == -1:
                     print(datetime.datetime.strftime(index, '%Y-%m-%d'), "SELL", asset, "@ price: $",
                           round(closing_price.loc[index, asset], 3))
-                    pnl = self.transact(-1, asset=asset, price=closing_price.loc[index, asset], shares=150)
+                    pnl = self.transact(-1, asset=asset, price=closing_price.loc[index, asset], shares=np.floor(0.1 * self.portfolio.loc[asset, 'Shares']))
                 else:
                     self.portfolio.Price = closing_price.loc[index]
             # Adds daily record
             port_value = np.matmul(self.portfolio.Price, self.portfolio.Shares)
-            daily_records.loc[index] = [port_value, self.cash, self.pnl, (port_value + self.cash) - 1e5]
+            daily_records.loc[index] = [port_value, self.cash, self.pnl, (port_value + self.cash) - self.equity]
 
         return daily_records
 
