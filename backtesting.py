@@ -129,6 +129,7 @@ class Backtest:
         print("MAX DRAWDOWN:", returns.index[returns.Returns == min_ret].date[0].strftime('%Y-%m-%d'), round(min_ret, 3))
         print("GOLDEN TICKET:", returns.index[returns.Returns == max_ret].date[0].strftime('%Y-%m-%d'), round(max_ret, 3))
 
+        # Need to get a more refined process
         years = int(self.end[0:4]) - int(self.start[0:4])
         exp_ret = 100 * (((np.sum(records.iloc[len(records)-1, 0:2], axis=0) / np.sum(records.iloc[0, 0:2])) ** (1/years)) - 1)
         vol = np.std(pct_returns.Returns) * np.sqrt(252) * 100
