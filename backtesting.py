@@ -117,7 +117,7 @@ class Backtest:
         return daily_records
 
     def generate_report(self, records):
-        # Calculating percent change
+        # Calculating log percent change
         a = np.sum(records.iloc[:, 0:2], axis=1)
         pct_returns = np.diff(a) / a[1:]
         pct_returns = pd.DataFrame(np.insert(pct_returns, 0, 0.0, axis=0), columns=['Returns'])
