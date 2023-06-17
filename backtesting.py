@@ -3,6 +3,9 @@ import yfinance as yf
 import numpy as np
 import numexpr as ne
 import datetime
+
+from matplotlib import pyplot as plt
+
 from trading_strats import *
 
 
@@ -11,6 +14,7 @@ class Backtest:
         # Class objects
         self.start = start
         self.end = end
+        self.bench = pd.DataFrame()
         self.portfolio = portfolio
         self.assets = list(self.portfolio.index)
         self.equity = cash
@@ -36,6 +40,12 @@ class Backtest:
         # Recalculate the weights
         self.portfolio['Weights'] = self.portfolio.Shares / sum(self.portfolio.Shares)
 
+        # Downloads information for benchmarks
+        tickers = yf.Tickers(['SPY', 'BND'])
+        prices = tickers.history(start=self.start, end=self.end, interval="1d")['Close'].iloc[0]
+        self.bench['Price'] = prices
+        self.bench['Shares'] = np.floor(np.divide([self.equity, self.equity], prices))
+
     def transact(self, signal, asset, price, shares):
         # 1 == purchase transaction
         # -1 == sell transaction
@@ -47,11 +57,6 @@ class Backtest:
             else:
                 # Subtract the price to purchase from current cash holdings
                 self.cash -= cost
-
-                # Records new price as average of old and new price
-                old_price = self.portfolio.loc[asset, 'Price']
-                avg_price = 0.5 * (old_price + price)
-                self.portfolio.loc[asset, 'Price'] = avg_price
 
                 # Update the number of shares held for asset
                 self.portfolio.loc[asset, 'Shares'] += shares
@@ -85,71 +90,104 @@ class Backtest:
 
     def run(self):
         # Get price data for assets
-        tickers = yf.Tickers(self.assets)
+        tickers = yf.Tickers(self.assets + self.bench.index.tolist())
         print(self.assets)
         closing_price = tickers.history(start=self.start, end=self.end, interval="1d")['Close']
-
-        # Uses percent difference method to calculate daily returns
-        returns = closing_price.pct_change()[1:]
+        dividends = tickers.history(start=self.start, end=self.end, interval="1d")['Dividends']
 
         # Generate buy/sell signals
         signals = self.strategy.generate_signals()
 
         # Initializes dataframe for daily portfolio tracking
-        daily_records = pd.DataFrame(0.0, index=signals.index, columns=['Securities', 'Cash', 'RPnL', 'UPnL'])
-        pnl = 0.0
+        daily_records = pd.DataFrame(0.0, index=signals.index,
+                                     columns=['Securities', 'Cash', 'RPnL', 'UPnL', 'Equity', 'Fixed'])
         for index, day in signals.iterrows():
             for asset in self.assets:
                 if signals.loc[index, asset] == 1:
                     print(datetime.datetime.strftime(index, '%Y-%m-%d'), "BUY", asset, "@ price $",
                           round(closing_price.loc[index, asset], 3))
-                    pnl = self.transact(1, asset=asset, price=closing_price.loc[index, asset], shares=np.floor(0.3 * self.portfolio.loc[asset, 'Shares']))
+                    pnl = self.transact(1, asset=asset, price=closing_price.loc[index, asset],
+                                        shares=np.floor(0.1 * self.portfolio.loc[asset, 'Shares']))
                 elif signals.loc[index, asset] == -1:
                     print(datetime.datetime.strftime(index, '%Y-%m-%d'), "SELL", asset, "@ price: $",
                           round(closing_price.loc[index, asset], 3))
-                    pnl = self.transact(-1, asset=asset, price=closing_price.loc[index, asset], shares=np.floor(0.1 * self.portfolio.loc[asset, 'Shares']))
-                else:
-                    self.portfolio.Price = closing_price.loc[index]
-            # Adds daily record
-            port_value = np.matmul(self.portfolio.Price, self.portfolio.Shares)
-            daily_records.loc[index] = [port_value, self.cash, self.pnl, (port_value + self.cash) - self.equity]
+                    pnl = self.transact(-1, asset=asset, price=closing_price.loc[index, asset],
+                                        shares=np.floor(0.2 * self.portfolio.loc[asset, 'Shares']))
+            # Print Dividend Transactions
+            div = sum(dividends.loc[index, ~(dividends.columns.isin(['BND', 'SPY']))] * self.portfolio.Shares)
+            if div > 0:
+                self.cash += div
+                print(datetime.datetime.strftime(index, '%Y-%m-%d'), f"${round(div, 3)} IN DIVDENDS POSTED TO CASH")
+            # Adds daily records
+            self.portfolio.Price = closing_price.loc[index, ~(closing_price.columns.isin(['BND', 'SPY']))]
+            self.bench.Price = closing_price.loc[index, ['BND', 'SPY']]
+            daily_records.loc[index] = [np.matmul(self.portfolio.Price, self.portfolio.Shares),
+                                        self.cash,
+                                        self.pnl,
+                                        (np.matmul(self.portfolio.Price,
+                                                   self.portfolio.Shares) + self.cash) - self.equity,
+                                        self.bench.loc['SPY', 'Price'] * self.bench.loc['SPY', 'Shares'],
+                                        self.bench.loc['BND', 'Price'] * self.bench.loc['BND', 'Shares']]
 
         return daily_records
 
-    def generate_report(self, records):
-        # Calculating log percent change
-        a = np.sum(records.iloc[:, 0:2], axis=1)
-        pct_returns = np.diff(a) / a[1:]
-        pct_returns = pd.DataFrame(np.insert(pct_returns, 0, 0.0, axis=0), columns=['Returns'])
+    def generate_report(self, records, index):
+        # Calculating returns
+        a = pd.DataFrame(np.sum(records.iloc[:, 0:2], axis=1))
+        log_returns = pd.DataFrame((np.log(a/a.shift(1))[1:]).values, columns=['Returns'])
 
         values = pd.DataFrame(np.sum(records.iloc[:, 0:2], axis=1), index=records.index, columns=['Values'])
         returns = pd.DataFrame(np.diff(values.Values), index=records.index[1:], columns=['Returns'])
 
         max_ret, min_ret = max(returns.Returns), min(returns.Returns)
-        print("MAX DRAWDOWN:", returns.index[returns.Returns == min_ret].date[0].strftime('%Y-%m-%d'), round(min_ret, 3))
-        print("GOLDEN TICKET:", returns.index[returns.Returns == max_ret].date[0].strftime('%Y-%m-%d'), round(max_ret, 3))
+        print("MAX DRAWDOWN:", returns.index[returns.Returns == min_ret].date[0].strftime('%Y-%m-%d'),
+              round(min_ret, 3))
+        print("GOLDEN TICKET:", returns.index[returns.Returns == max_ret].date[0].strftime('%Y-%m-%d'),
+              round(max_ret, 3))
 
-        # Need to get a more refined process
-        years = int(self.end[0:4]) - int(self.start[0:4])
-        exp_ret = 100 * (((np.sum(records.iloc[len(records)-1, 0:2], axis=0) / np.sum(records.iloc[0, 0:2])) ** (1/years)) - 1)
-        vol = np.std(pct_returns.Returns) * np.sqrt(252) * 100
+        difference = datetime.datetime.strptime(self.end, "%Y-%m-%d") - datetime.datetime.strptime(self.start, "%Y-%m-%d")
+        delta = difference.days / 365.25
+
+        exp_ret = np.divide(sum(records.loc[records.index[-1], ['Securities', 'Cash']]),
+                            sum(records.loc[records.index[0], ['Securities', 'Cash']])) ** (1 / delta) - 1
+        vol = np.std(log_returns.Returns) * np.sqrt(252) * 100
         print("PORTFOLIO VOLATILITY:", round(vol, 3))
-        print("PORTFOLIO RETURN:", round(exp_ret, 3))
-        print("SHARPE RATIO:", round((exp_ret - 2.25)/vol, 3))
+        print("PORTFOLIO RETURN:", round(100 * exp_ret, 3))
+        print("SHARPE RATIO:", round((100*exp_ret - 2.25) / vol, 3))
 
-    def update_portfolio(self, portfolio: pd.DataFrame):
-        # Add cash position to portfolio
-        portfolio.loc['JPST'] = self.portfolio.Weights.loc['JPST'] * self.cash
-        self.portfolio = portfolio
+        plt.plot(values)
+        plt.plot(records.loc[:, index])
+        plt.title("Portfolio vs Index")
+        plt.legend(['Portfolio', 'Equity Index'])
+        plt.show()
 
-        # Convert portfolio to dataframe and normalize weights
-        self.portfolio['Weights'] = np.divide(self.portfolio['Weights'], np.sum(self.portfolio['Weights']))
+    def update_portfolio(self, portfolio: pd.DataFrame, cash: float):
+        # Get price data for assets and updates internal
+        # object attributes
+        self.assets = list(portfolio.index)
+        self.equity = self.cash = cash
 
-        # Get list of assets in portfolio
-        self.assets = portfolio.index.tolist()
+        # Redownloads tickers and pricing history
+        tickers = yf.Tickers(self.assets)
+        prices = tickers.history(start=self.start, end=self.end, interval="1d")['Close'].iloc[0]
 
-        # Updates the strategy
-        # self.strategy = MovingAverageCrossoverStrategy(self.assets, self.start, self.end)
+        self.portfolio = pd.DataFrame()
+        # Adds purchase and weights price to dataframe
+        self.portfolio['Price'] = prices
+        self.portfolio['Weights'] = portfolio.Weights
+
+        # Calculate the number of shares
+        self.portfolio['Shares'] = np.floor((self.portfolio.Weights * self.cash) / prices)
+
+        # Calculates cost of portfolio and updates the cash holdings
+        cost = np.matmul(self.portfolio.Price, self.portfolio.Shares)
+        self.cash -= cost
+
+        # Recalculate the weights
+        self.portfolio['Weights'] = self.portfolio.Shares / sum(self.portfolio.Shares)
+
+        # Update the trading strategy
+        self.strategy.updateAssets(portfolio.index.tolist())
 
     def get_portfolio(self):
         # Returns the current portfolio in-use by the backtesting model
