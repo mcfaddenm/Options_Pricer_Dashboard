@@ -1,11 +1,4 @@
-import pandas as pd
-import yfinance as yf
-import numpy as np
-import numexpr as ne
-import datetime
-
 from matplotlib import pyplot as plt
-
 from trading_strats import *
 
 
@@ -63,7 +56,6 @@ class Backtest:
 
                 # Recalculate portfolio weights
                 self.portfolio.Weights = self.portfolio.Shares / sum(self.portfolio.Shares)
-            return 0
         elif signal == -1:
             # Current Price
             current_price = price
@@ -86,7 +78,6 @@ class Backtest:
 
                 # Calculates PnL
                 self.pnl += (current_price - prev_price) * shares
-                return self.pnl
 
     def run(self):
         # Get price data for assets
@@ -106,21 +97,23 @@ class Backtest:
                 if signals.loc[index, asset] == 1:
                     print(datetime.datetime.strftime(index, '%Y-%m-%d'), "BUY", asset, "@ price $",
                           round(closing_price.loc[index, asset], 3))
-                    pnl = self.transact(1, asset=asset, price=closing_price.loc[index, asset],
-                                        shares=np.floor(0.1 * self.portfolio.loc[asset, 'Shares']))
+                    self.transact(1, asset=asset, price=closing_price.loc[index, asset],
+                                  shares=np.floor(0.2 * self.portfolio.loc[asset, 'Shares']))
                 elif signals.loc[index, asset] == -1:
                     print(datetime.datetime.strftime(index, '%Y-%m-%d'), "SELL", asset, "@ price: $",
                           round(closing_price.loc[index, asset], 3))
-                    pnl = self.transact(-1, asset=asset, price=closing_price.loc[index, asset],
-                                        shares=np.floor(0.2 * self.portfolio.loc[asset, 'Shares']))
+                    self.transact(-1, asset=asset, price=closing_price.loc[index, asset],
+                                  shares=np.floor(0.2 * self.portfolio.loc[asset, 'Shares']))
             # Print Dividend Transactions
             div = sum(dividends.loc[index, ~(dividends.columns.isin(['BND', 'SPY']))] * self.portfolio.Shares)
             if div > 0:
                 self.cash += div
                 print(datetime.datetime.strftime(index, '%Y-%m-%d'), f"${round(div, 3)} IN DIVDENDS POSTED TO CASH")
-            # Adds daily records
+            # Records assets closing price for portfolio valuation
             self.portfolio.Price = closing_price.loc[index, ~(closing_price.columns.isin(['BND', 'SPY']))]
+            # Records benchmark assets closing price for portfolio valuation
             self.bench.Price = closing_price.loc[index, ['BND', 'SPY']]
+            # Daily records
             daily_records.loc[index] = [np.matmul(self.portfolio.Price, self.portfolio.Shares),
                                         self.cash,
                                         self.pnl,
@@ -131,32 +124,43 @@ class Backtest:
 
         return daily_records
 
-    def generate_report(self, records, index):
-        # Calculating returns
-        a = pd.DataFrame(np.sum(records.iloc[:, 0:2], axis=1))
-        log_returns = pd.DataFrame((np.log(a/a.shift(1))[1:]).values, columns=['Returns'])
+    def generate_report(self, records, bench):
+        # Calculating daily portfolio value
+        values = pd.DataFrame(np.sum(records.loc[:, ['Securities', 'Cash']], axis=1),
+                              index=records.index,
+                              columns=['Value'])
 
-        values = pd.DataFrame(np.sum(records.iloc[:, 0:2], axis=1), index=records.index, columns=['Values'])
-        returns = pd.DataFrame(np.diff(values.Values), index=records.index[1:], columns=['Returns'])
+        # Calculates log returns and ending value change
+        returns = np.log(values.Value / values.Value.shift(1))[1:]
+        changes = pd.DataFrame(np.diff(values.Value)[1:],
+                               index=records.index[2:])
 
-        max_ret, min_ret = max(returns.Returns), min(returns.Returns)
-        print("MAX DRAWDOWN:", returns.index[returns.Returns == min_ret].date[0].strftime('%Y-%m-%d'),
-              round(min_ret, 3))
-        print("GOLDEN TICKET:", returns.index[returns.Returns == max_ret].date[0].strftime('%Y-%m-%d'),
-              round(max_ret, 3))
+        # Minimum and Maximum Returns
+        max_ret, min_ret = max(changes[0]), min(changes[0])
 
-        difference = datetime.datetime.strptime(self.end, "%Y-%m-%d") - datetime.datetime.strptime(self.start, "%Y-%m-%d")
-        delta = difference.days / 365.25
+        # Calculates the start/end diff in terms of years as a float
+        delta = np.subtract(datetime.datetime.strptime(self.end, "%Y-%m-%d"),
+                            datetime.datetime.strptime(self.start, "%Y-%m-%d")).days / 365.25
 
+        # Portfolio Annualized Return
         exp_ret = np.divide(sum(records.loc[records.index[-1], ['Securities', 'Cash']]),
                             sum(records.loc[records.index[0], ['Securities', 'Cash']])) ** (1 / delta) - 1
-        vol = np.std(log_returns.Returns) * np.sqrt(252) * 100
-        print("PORTFOLIO VOLATILITY:", round(vol, 3))
+        # Portfolio Volatility
+        vol = np.std(returns) * np.sqrt(252) * 100
+
+        # Prints worst trading day
+        print("MAX DRAWDOWN:", changes.index[changes[0] == min_ret].date.item().strftime('%Y-%m-%d'),
+              round(min_ret, 3))
+        # Prints best trading day
+        print("GOLDEN TICKET:", changes.index[changes[0] == max_ret].date.item().strftime('%Y-%m-%d'),
+              round(max_ret, 3))
         print("PORTFOLIO RETURN:", round(100 * exp_ret, 3))
-        print("SHARPE RATIO:", round((100*exp_ret - 2.25) / vol, 3))
+        print("PORTFOLIO VOLATILITY:", round(vol, 3))
+
+        print("SHARPE RATIO:", round((100 * exp_ret - 2.25) / vol, 3))
 
         plt.plot(values)
-        plt.plot(records.loc[:, index])
+        plt.plot(records.loc[:, bench])
         plt.title("Portfolio vs Index")
         plt.legend(['Portfolio', 'Equity Index'])
         plt.show()
@@ -177,7 +181,7 @@ class Backtest:
         self.portfolio['Weights'] = portfolio.Weights
 
         # Calculate the number of shares
-        self.portfolio['Shares'] = np.floor((self.portfolio.Weights * self.cash) / prices)
+        self.portfolio['Shares'] = np.floor(np.divide(self.portfolio.Weights * self.cash, prices))
 
         # Calculates cost of portfolio and updates the cash holdings
         cost = np.matmul(self.portfolio.Price, self.portfolio.Shares)
